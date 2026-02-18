@@ -2,112 +2,322 @@
 
 **Detecting when the investment universe itself changes — not just probabilities within it.**
 
-MGMT 69000 — AI in Finance | Purdue University
+MGMT 69000 — Mastering AI for Finance | Purdue University
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://your-app.streamlit.app)
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://sylviangomben-used.streamlit.app)
 
-## What This Does
+---
 
-Traditional regime detection (HMMs) catches probability shifts within a known universe (*P changes*). This tool goes further — it detects when the investment universe itself changes (*X changes*, or **sample space expansion**).
+## The Problem
 
-**Case study: ChatGPT's launch (Nov 30, 2022)**
-- NVDA went from a gaming GPU company to AI infrastructure backbone (+800% in 2 years)
-- CHGG went from an education leader to disrupted incumbent (-90%)
-- This wasn't a normal market regime shift — AI created entirely new categories of winners and losers
+Traditional regime detection tools like Hidden Markov Models (HMMs) catch probability shifts within a known investment universe — what we call **P changes**. But they completely miss when the investment universe *itself* changes — when new asset classes emerge and old ones die. We call this **X changes**, or **sample space expansion**.
+
+**No existing open-source project fuses quantitative regime detection with LLM-powered narrative analysis to make this distinction.** FinGPT does sentiment. hmmlearn does regimes. Nobody combines them to tell you whether the game changed, or just the odds.
+
+### Case Study: ChatGPT's Launch (Nov 30, 2022)
+
+| What Happened | Before | After |
+|---------------|--------|-------|
+| NVDA | Gaming GPU company | AI infrastructure backbone (+800%) |
+| CHGG | Education market leader | Disrupted incumbent (-90%) |
+| Investment universe | Tech = FAANG | Tech = FAANG + "AI Infrastructure" |
+| Portfolio question | "What's your tech allocation?" | "What's your AI exposure?" |
+
+This wasn't a regime shift. **The game itself changed.**
+
+---
 
 ## Architecture
 
+SSED uses a three-layer architecture where each layer builds on the previous one:
+
 ```
-Layer 1: Quantitative Signals (deterministic, runs locally)
-  ├── HMM regime detection (hmmlearn) — 3 volatility states
-  ├── Shannon entropy — rolling concentration/novelty measurement
-  ├── Winner/loser divergence — spread velocity + acceleration
-  └── HHI concentration index — market structure shifts
-
-Layer 2: Narrative Signals (OpenAI API)
-  ├── News sentiment (GPT-4.1-nano bulk scoring)
-  ├── SEC filing language shifts (10-K Risk Factor diffs)
-  └── Novel risk factor detection ("AI" appearing in CHGG's 10-K)
-
-Layer 3: Fusion & Classification (OpenAI o4-mini reasoning)
-  ├── 6 function-calling tools with strict: True
-  ├── Structured output: RegimeClassification (Pydantic)
-  └── P change vs X change classification with evidence chain
+┌─────────────────────────────────────────────────────────────┐
+│  Layer 3: AI Fusion & Classification (OpenAI o4-mini)       │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  6 function-calling tools (strict: True)            │    │
+│  │  → Calls into Layer 1 & Layer 2 for real data       │    │
+│  │  → Structured output: RegimeClassification          │    │
+│  │  → Classification: P change vs X change             │    │
+│  │  → Confidence + evidence chain + reasoning          │    │
+│  └─────────────────────────────────────────────────────┘    │
+├─────────────────────────────────────────────────────────────┤
+│  Layer 2: Narrative Signals (OpenAI GPT-4.1-nano + APIs)    │
+│  ┌──────────────────────┐  ┌────────────────────────────┐   │
+│  │  News Sentiment       │  │  Novel Theme Detection     │   │
+│  │  • NewsAPI feed       │  │  • Unprecedented terms     │   │
+│  │  • GPT-4.1-nano       │  │  • Category emergence      │   │
+│  │    bulk scoring       │  │  • Narrative shift signal   │   │
+│  └──────────────────────┘  └────────────────────────────┘   │
+├─────────────────────────────────────────────────────────────┤
+│  Layer 1: Quantitative Signals (deterministic, local)       │
+│  ┌────────────┐ ┌──────────┐ ┌────────────┐ ┌───────────┐  │
+│  │ HMM Regime │ │ Shannon  │ │ Winner/    │ │ HHI       │  │
+│  │ Detection  │ │ Entropy  │ │ Loser      │ │ Concen-   │  │
+│  │ (3 states) │ │ (rolling)│ │ Divergence │ │ tration   │  │
+│  └────────────┘ └──────────┘ └────────────┘ └───────────┘  │
+├─────────────────────────────────────────────────────────────┤
+│  Data Layer                                                  │
+│  yfinance (prices) │ NewsAPI (news) │ SEC EDGAR (filings)   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Long-Short Portfolio Backtest
+### Layer 1: Quantitative Signals (`quant_signals.py`)
 
-The system's thesis is validated through a dollar-neutral long-short portfolio:
-- **Long:** NVDA, MSFT (AI infrastructure winners)
-- **Short:** CHGG (disrupted education incumbent)
-- **Period:** Nov 2022 – Dec 2024 (post-ChatGPT launch)
+All deterministic — no LLM involvement. Runs entirely locally.
 
-| Metric | Value |
-|--------|-------|
+| Signal | Method | What It Detects |
+|--------|--------|-----------------|
+| **HMM Regime** | Gaussian HMM (hmmlearn), 3 states sorted by volatility | Volatility regime transitions, model fit deterioration |
+| **Shannon Entropy** | Rolling entropy of return distributions with z-score | Concentration/novelty — low entropy = few stocks dominating |
+| **Divergence** | Winner vs loser spread with velocity + acceleration | Creative destruction — winners pulling away from losers |
+| **HHI Concentration** | Herfindahl-Hirschman Index before/after comparison | Market structure shifts — increasing concentration |
+
+### Layer 2: Narrative Signals (`narrative_signals.py`)
+
+Bridges quantitative data with human narrative using LLMs.
+
+| Source | Model | What It Detects |
+|--------|-------|-----------------|
+| **NewsAPI** | GPT-4.1-nano (bulk sentiment scoring) | Sentiment shifts, novel theme emergence |
+| **Demo Articles** | Curated real headlines (fallback) | Works without API keys |
+
+- News articles are scored for sentiment (-1 to +1) and scanned for novel themes
+- Themes like "artificial intelligence", "generative AI", "large language model" are flagged as novel category indicators
+- Falls back to keyword-based heuristic scoring when OpenAI is unavailable
+
+### Layer 3: Fusion & Classification (`openai_core.py`)
+
+The core innovation — OpenAI o4-mini reasons across all signals using function calling.
+
+**6 Tools (all with `strict: True`):**
+
+| Tool | Returns | Purpose |
+|------|---------|---------|
+| `get_hmm_regime` | Regime state, probability, transition matrix | Current volatility regime |
+| `get_entropy_signals` | Entropy values, z-score, rolling history | Concentration anomalies |
+| `get_divergence` | Winner/loser returns, spread, velocity | Creative destruction magnitude |
+| `get_concentration` | HHI before/after, top-N weights | Market structure change |
+| `get_news_sentiment` | Article count, avg sentiment, themes | Narrative shift detection |
+| `get_sec_filing_diff` | New/removed risk factors, language shift | Regulatory awareness of change |
+
+**How it works:**
+1. User describes an event (e.g., "ChatGPT Launch")
+2. o4-mini receives a system prompt teaching the P vs X framework
+3. The model calls tools to gather real data (never generates numbers)
+4. After collecting evidence, it produces a **structured `RegimeClassification`** via Pydantic:
+   - `classification`: `regime_shift` | `sample_space_expansion` | `mean_reversion` | `inconclusive`
+   - `confidence`: `high` | `medium` | `low`
+   - `key_evidence`: list of specific data points
+   - `reasoning`: natural language explanation
+
+---
+
+## Features
+
+### Event Analysis
+Run the full 3-layer analysis on any market event. Configure winner/loser tickers, event date, and analysis period. Includes 6 preset scenarios:
+- ChatGPT Launch (NVDA vs CHGG)
+- iPhone Revolution (AAPL vs NOK)
+- Streaming Wars (NFLX vs DIS)
+- EV Disruption (TSLA vs F)
+- Cloud Computing (AMZN vs IBM)
+- Social Media Shift (META vs SNAP)
+
+### Long-Short Portfolio Backtest
+Dollar-neutral strategy validating the SSED thesis:
+- **Long leg:** AI infrastructure winners (configurable tickers)
+- **Short leg:** Disrupted incumbents
+- **Metrics:** Total return, alpha, Sharpe ratio, max drawdown, volatility
+- **Visualization:** Equity curves for portfolio, long leg, short leg, and benchmark
+
+| Metric (ChatGPT case) | Value |
+|------------------------|-------|
 | Total Return | +243% |
 | Alpha vs SPY | +191% |
 | Sharpe Ratio | 2.35 |
 | Max Drawdown | -17.3% |
 
+### Multi-Event Comparison
+Compare expansion signals across multiple historical disruptions side by side:
+- Winner/loser return bar charts
+- Divergence comparison across events
+- Identifies which events show true sample space expansion vs normal regime shifts
+
+### Live Market Scanner & Sector Heatmap
+Real-time scan across all 11 S&P 500 sectors (55 stocks):
+- **Expansion score** (0-1) per sector combining divergence, entropy, and momentum
+- Color-coded heatmap (green/yellow/red)
+- Top winners and losers across all tracked stocks
+- Alerts when sectors show elevated expansion signals
+
+### AI Chat
+Ask questions about the analysis powered by GPT-4.1-nano with full context from the current analysis data.
+
+### Export Report
+One-click downloadable report with all metrics, signals, and classification results.
+
+---
+
 ## Quick Start
 
-```bash
-# Clone and install
-git clone https://github.com/YOUR_USERNAME/ssed.git
-cd ssed
-pip install -r requirements.txt
+### 1. Clone and Install
 
-# Run the dashboard (works without API keys — demo mode)
+```bash
+git clone https://github.com/sylviangomben/used.git
+cd used
+pip install -r requirements.txt
+```
+
+### 2. Run the Dashboard
+
+```bash
 streamlit run ssed/dashboard.py
 ```
 
-### Optional: Enable AI Features
+The dashboard works immediately in **demo mode** — no API keys required.
+
+### 3. (Optional) Enable AI Features
 
 ```bash
 cp .env.example .env
-# Edit .env with your keys:
-#   OPENAI_API_KEY=sk-...     (enables Layer 2+3 AI analysis)
-#   NEWSAPI_KEY=...           (enables live news sentiment)
 ```
+
+Edit `.env` with your keys:
+
+```
+OPENAI_API_KEY=sk-...     # Enables Layer 2+3 AI analysis
+NEWSAPI_KEY=...           # Enables live news feed (free at newsapi.org)
+```
+
+---
 
 ## Three Operating Modes
 
-| Mode | What You Need | What Works |
-|------|--------------|------------|
-| **Demo** (no keys) | Nothing | Quant signals, backtest, heuristic classification |
-| **OpenAI only** | `OPENAI_API_KEY` | + AI classification, sentiment scoring, filing analysis |
+| Mode | API Keys Needed | What Works |
+|------|----------------|------------|
+| **Demo** | None | Quant signals, backtest, sector scanner, heuristic classification, multi-event comparison |
+| **OpenAI** | `OPENAI_API_KEY` | + AI classification (o4-mini), sentiment scoring (GPT-4.1-nano), AI chat |
 | **Full** | Both keys | + Live news feed from NewsAPI |
+
+The system gracefully degrades — every AI feature has a heuristic fallback that runs without API keys.
+
+---
 
 ## Project Structure
 
 ```
-ssed/
-├── quant_signals.py      # Layer 1: HMM, entropy, divergence, HHI
-├── narrative_signals.py  # Layer 2: news sentiment, SEC filing diffs
-├── openai_core.py        # Layer 3: function calling + fusion classifier
-├── backtest.py           # Long-short portfolio backtest engine
-└── dashboard.py          # Streamlit UI — all layers visualized
+project2/
+├── ssed/                        # Core package
+│   ├── __init__.py
+│   ├── quant_signals.py         # Layer 1: HMM, entropy, divergence, HHI
+│   ├── narrative_signals.py     # Layer 2: news sentiment, novel theme detection
+│   ├── openai_core.py           # Layer 3: function calling + fusion classifier
+│   ├── backtest.py              # Long-short portfolio backtest engine
+│   ├── sector_scanner.py        # Live market scanner across S&P 500 sectors
+│   └── dashboard.py             # Streamlit UI — all features integrated
+├── portfolio_analyzer.py        # Original entropy/portfolio analysis (foundation)
+├── validate_thesis.py           # Original divergence validation (foundation)
+├── starter_template.py          # DRIVER framework cascade mapping (foundation)
+├── requirements.txt             # Python dependencies
+├── .env.example                 # API key template
+├── .streamlit/config.toml       # Streamlit Cloud deployment config
+└── product/
+    ├── product-overview.md      # Product definition & research findings
+    └── product-roadmap.md       # Build roadmap (4 sections)
 ```
+
+---
+
+## APIs Used
+
+### OpenAI API
+- **o4-mini** (`reasoning_effort="high"`) — Layer 3 fusion and classification. Receives tool call results from all signals and produces a structured `RegimeClassification` via `client.beta.chat.completions.parse()`.
+- **GPT-4.1-nano** — Layer 2 bulk sentiment scoring of news articles. Fast and cheap for batch processing. Also powers the AI chat feature.
+- **Function calling** with `strict: True` on all 6 tool definitions ensures the model only calls tools with valid parameters.
+- **Structured Outputs** via Pydantic models — every LLM response is typed, never free-form text parsing.
+- **Chat Completions API** (not Assistants) — full control over context, multi-model routing, lower latency.
+
+### NewsAPI
+- Free tier (100 requests/day) for financial news headlines
+- Queries by keyword + date range
+- Articles are scored for sentiment and scanned for novel theme emergence
+
+### yfinance
+- Free market data — adjusted close prices for any ticker
+- Used across Layer 1 (quant signals), backtest, and sector scanner
+
+### SEC EDGAR
+- Direct API calls to `data.sec.gov/submissions/` for company filing metadata
+- Full-text filing retrieval for risk factor extraction
+- CIK lookup for ticker-to-company mapping
+
+---
 
 ## Key Design Decisions
 
-1. **LLM as orchestrator, not calculator** — All numbers come from deterministic code; OpenAI interprets and reasons
-2. **Function calling with `strict: True`** — 6 tools that return real data; LLM never generates numbers
-3. **Structured outputs via Pydantic** — Every LLM response is typed, never free-form text parsing
-4. **Graceful degradation** — Works without any API keys using heuristic fallbacks
-5. **Direct APIs over frameworks** — OpenAI function calling directly (no LangChain), SEC EDGAR API directly (no heavy wrappers)
+1. **LLM as orchestrator, not calculator** — All numbers come from deterministic code (numpy, pandas, hmmlearn). OpenAI interprets and reasons over results, never generates financial data.
+
+2. **Function calling with `strict: True`** — The LLM calls tools that return real data. This prevents hallucination of financial metrics and ensures reproducibility.
+
+3. **Structured outputs via Pydantic** — Every LLM response is typed (`RegimeClassification`, `ArticleSentiment`, etc.). No regex parsing of free-form text.
+
+4. **Graceful degradation** — Every AI feature has a heuristic fallback. The dashboard is fully functional without any API keys using rule-based classification (signal convergence counting).
+
+5. **Direct APIs over frameworks** — OpenAI function calling directly (no LangChain abstraction), SEC EDGAR API directly (no heavy wrappers). Simpler code, fewer dependencies, full control.
+
+6. **Two-tier model routing** — GPT-4.1-nano for high-volume, low-complexity tasks (sentiment scoring). o4-mini for low-volume, high-complexity reasoning (fusion classification). Optimizes cost and quality.
+
+---
+
+## The Thesis
+
+**Sample space expansion** is fundamentally different from a regime shift:
+
+| Concept | Regime Shift (P changed) | Sample Space Expansion (X changed) |
+|---------|-------------------------|-------------------------------------|
+| What changes | Probabilities within known universe | The universe itself |
+| Example | Fed rate hike changes sector rotation | ChatGPT creates "AI infrastructure" as new category |
+| HMM detects? | Yes | No — model fit deteriorates |
+| Detection requires | Quantitative signals alone | Quant + narrative fusion |
+| Portfolio impact | Rebalance within existing framework | Framework itself needs updating |
+
+The detection signal: **when both statistical measures (entropy anomaly, HMM deterioration, divergence spike) and narrative measures (novel themes, unprecedented terminology) simultaneously indicate the historical model is breaking down.**
+
+---
 
 ## Tech Stack
 
-- **UI:** Streamlit
-- **Quant:** pandas, numpy, hmmlearn, scikit-learn, scipy
-- **AI:** OpenAI API (o4-mini for reasoning, GPT-4.1-nano for bulk sentiment)
-- **Data:** yfinance, NewsAPI, SEC EDGAR
-- **Visualization:** Plotly
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| **UI** | Streamlit | Interactive dashboard, charts, sidebar config |
+| **Visualization** | Plotly | Equity curves, heatmaps, regime timelines |
+| **Quant** | pandas, numpy, scipy | Data manipulation, statistical calculations |
+| **HMM** | hmmlearn | Gaussian HMM regime detection (3 volatility states) |
+| **ML** | scikit-learn | Supporting ML utilities |
+| **AI** | OpenAI API | Function calling, structured outputs, sentiment |
+| **Structured Data** | Pydantic | Typed LLM outputs, data validation |
+| **Market Data** | yfinance | Free price data for any ticker |
+| **News** | NewsAPI | Financial news headlines and articles |
+| **Filings** | SEC EDGAR API | Company filing metadata and text |
+| **Config** | python-dotenv | API key management via `.env` |
+
+---
 
 ## References
 
-- Shannon, C. E. (1948). "A Mathematical Theory of Communication"
-- Rabiner, L. R. (1989). "A Tutorial on Hidden Markov Models"
-- Herfindahl-Hirschman Index (HHI) — U.S. Department of Justice
-- OpenAI Function Calling — [docs.openai.com](https://platform.openai.com/docs/guides/function-calling)
+- Shannon, C. E. (1948). "A Mathematical Theory of Communication." *Bell System Technical Journal*, 27(3), 379-423.
+- Rabiner, L. R. (1989). "A Tutorial on Hidden Markov Models and Selected Applications in Speech Recognition." *Proceedings of the IEEE*, 77(2), 257-286.
+- Herfindahl-Hirschman Index (HHI) — U.S. Department of Justice, Market Concentration Measurement.
+- OpenAI Function Calling — [platform.openai.com/docs/guides/function-calling](https://platform.openai.com/docs/guides/function-calling)
+- OpenAI Structured Outputs — [platform.openai.com/docs/guides/structured-outputs](https://platform.openai.com/docs/guides/structured-outputs)
+
+---
+
+## License
+
+MIT
+
+---
+
+*Built for MGMT 69000: Mastering AI for Finance — Purdue University*
