@@ -7,8 +7,10 @@ entropy, divergence, and momentum metrics.
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+
+from ssed.quant_signals import fetch_prices
 
 
 # Sector ETFs representing S&P 500 sectors
@@ -72,23 +74,17 @@ def scan_sectors(
 
     Returns list of SectorSignal sorted by expansion_score (highest first).
     """
-    # Fetch all ETFs
+    # Fetch all ETFs via financialdatasets.ai
     etf_tickers = list(SECTOR_ETFS.values())
+    end_date = datetime.now().strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=lookback_days + 60)).strftime("%Y-%m-%d")
     try:
-        etf_data = yf.download(etf_tickers, period=f"{lookback_days + 30}d", progress=False)
+        etf_prices = fetch_prices(etf_tickers, start_date, end_date)
     except Exception:
         return []
 
-    if etf_data.empty:
+    if etf_prices.empty:
         return []
-
-    if isinstance(etf_data.columns, pd.MultiIndex):
-        etf_prices = etf_data["Close"].copy()
-    else:
-        etf_prices = etf_data[["Close"]]
-
-    if etf_prices.index.tz is not None:
-        etf_prices.index = etf_prices.index.tz_localize(None)
 
     signals = []
 
@@ -123,15 +119,8 @@ def scan_sectors(
         divergence_score = 0.0
         if stocks:
             try:
-                stock_data = yf.download(stocks, period=f"{lookback_days + 10}d", progress=False)
-                if not stock_data.empty:
-                    if isinstance(stock_data.columns, pd.MultiIndex):
-                        stock_prices = stock_data["Close"].copy()
-                    else:
-                        stock_prices = stock_data[["Close"]]
-                        stock_prices.columns = stocks[:1]
-
-                    # Compute returns for each stock
+                stock_prices = fetch_prices(stocks, start_date, end_date)
+                if not stock_prices.empty:
                     stock_returns = {}
                     for s in stocks:
                         if s in stock_prices.columns:
@@ -183,21 +172,15 @@ def scan_market_movers(
         all_stocks.extend(stocks)
     all_stocks = list(set(all_stocks))
 
+    end_date = datetime.now().strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=lookback_days + 30)).strftime("%Y-%m-%d")
     try:
-        data = yf.download(all_stocks, period=f"{lookback_days + 10}d", progress=False)
+        prices = fetch_prices(all_stocks, start_date, end_date)
     except Exception:
         return pd.DataFrame()
 
-    if data.empty:
+    if prices.empty:
         return pd.DataFrame()
-
-    if isinstance(data.columns, pd.MultiIndex):
-        prices = data["Close"].copy()
-    else:
-        prices = data[["Close"]]
-
-    if prices.index.tz is not None:
-        prices.index = prices.index.tz_localize(None)
 
     results = []
     for ticker in all_stocks:

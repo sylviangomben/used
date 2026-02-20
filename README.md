@@ -58,7 +58,7 @@ SSED uses a three-layer architecture where each layer builds on the previous one
 │  └────────────┘ └──────────┘ └────────────┘ └───────────┘  │
 ├─────────────────────────────────────────────────────────────┤
 │  Data Layer                                                  │
-│  yfinance (prices) │ NewsAPI (news) │ SEC EDGAR (filings)   │
+│  financialdatasets.ai (prices) │ NewsAPI (news) │ SEC EDGAR │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -115,8 +115,8 @@ The core innovation — OpenAI o4-mini reasons across all signals using function
 
 ## Features
 
-### Event Analysis
-Run the full 3-layer analysis on any market event. Configure winner/loser tickers, event date, and analysis period. Includes 6 preset scenarios:
+### Event Analysis (Non-Deterministic AI)
+Run the full 3-layer analysis on any market event. The AI classification (Layer 3, o4-mini) and AI market narrative summary (GPT-4.1-nano) run **automatically** as part of every analysis — producing different reasoning each time (non-deterministic). Configure winner/loser tickers, event date, and analysis period. Includes 6 preset scenarios:
 - ChatGPT Launch (NVDA vs CHGG)
 - iPhone Revolution (AAPL vs NOK)
 - Streaming Wars (NFLX vs DIS)
@@ -186,8 +186,9 @@ cp .env.example .env
 Edit `.env` with your keys:
 
 ```
-OPENAI_API_KEY=sk-...     # Enables Layer 2+3 AI analysis
-NEWSAPI_KEY=...           # Enables live news feed (free at newsapi.org)
+OPENAI_API_KEY=sk-...              # Enables Layer 2+3 AI analysis
+NEWSAPI_KEY=...                    # Enables live news feed (free at newsapi.org)
+FINANCIAL_DATASETS_API_KEY=...     # Market price data (financialdatasets.ai)
 ```
 
 ---
@@ -196,9 +197,9 @@ NEWSAPI_KEY=...           # Enables live news feed (free at newsapi.org)
 
 | Mode | API Keys Needed | What Works |
 |------|----------------|------------|
-| **Demo** | None | Quant signals, backtest, sector scanner, heuristic classification, multi-event comparison |
-| **OpenAI** | `OPENAI_API_KEY` | + AI classification (o4-mini), sentiment scoring (GPT-4.1-nano), AI chat |
-| **Full** | Both keys | + Live news feed from NewsAPI |
+| **Demo** | `FINANCIAL_DATASETS_API_KEY` | Quant signals, backtest, sector scanner, heuristic classification, multi-event comparison |
+| **OpenAI** | + `OPENAI_API_KEY` | + AI classification (o4-mini), sentiment scoring (GPT-4.1-nano), AI chat, AI narrative summary |
+| **Full** | + `NEWSAPI_KEY` | + Live news feed from NewsAPI |
 
 The system gracefully degrades — every AI feature has a heuristic fallback that runs without API keys.
 
@@ -243,9 +244,10 @@ project2/
 - Queries by keyword + date range
 - Articles are scored for sentiment and scanned for novel theme emergence
 
-### yfinance
-- Free market data — adjusted close prices for any ticker
+### financialdatasets.ai
+- REST API for market data — close prices for any ticker
 - Used across Layer 1 (quant signals), backtest, and sector scanner
+- Requires API key (`FINANCIAL_DATASETS_API_KEY` in `.env`)
 
 ### SEC EDGAR
 - Direct API calls to `data.sec.gov/submissions/` for company filing metadata
@@ -297,10 +299,47 @@ The detection signal: **when both statistical measures (entropy anomaly, HMM det
 | **ML** | scikit-learn | Supporting ML utilities |
 | **AI** | OpenAI API | Function calling, structured outputs, sentiment |
 | **Structured Data** | Pydantic | Typed LLM outputs, data validation |
-| **Market Data** | yfinance | Free price data for any ticker |
+| **Market Data** | financialdatasets.ai | REST API for price data |
 | **News** | NewsAPI | Financial news headlines and articles |
 | **Filings** | SEC EDGAR API | Company filing metadata and text |
 | **Config** | python-dotenv | API key management via `.env` |
+
+---
+
+## AI Development Workflow (DRIVER Framework)
+
+SSED was built using **Claude Code as a structured AI co-worker**, following the DRIVER framework to systematically move from research through implementation. The AI wasn't just a code generator — it was a collaborator at every stage.
+
+### How AI Was Used at Each Phase
+
+| Phase | What the AI Did | Human Role |
+|-------|----------------|------------|
+| **Discover** | Researched existing tools (FinGPT, hmmlearn, OpenBB), identified the gap: no tool fuses quant regime detection with LLM narrative analysis | Defined the thesis (P vs X changes) |
+| **Define** | Wrote `product-overview.md` — problem statement, architecture, tech stack decisions, tiered build plan | Validated scope, chose what to cut |
+| **Represent** | Designed the 3-layer architecture, defined data models (`QuantSignals`, `RegimeClassification`), planned the `product-roadmap.md` with 4 buildable sections | Approved architecture, set priorities |
+| **Implement** | Built all code across 4 sections: quant engine, OpenAI function calling core, narrative layer, fusion dashboard | Tested each section, provided feedback |
+| **Validate** | Ran backtests, verified signal convergence, tested API integrations (financialdatasets.ai, OpenAI, NewsAPI) | Confirmed results matched thesis |
+| **Evolve** | Migrated yfinance to financialdatasets.ai, made AI classification automatic (non-deterministic), added AI narrative summary | Relayed professor feedback, directed changes |
+
+### Non-Deterministic AI Features
+
+The professor's requirement for non-deterministic AI/LLM usage is addressed in two places:
+
+1. **AI Classification (Layer 3)** — OpenAI o4-mini reasons over all quantitative and narrative signals via function calling, producing a typed `RegimeClassification`. This runs **automatically** on every analysis and produces **different reasoning each time** because LLM inference is inherently non-deterministic.
+
+2. **AI Market Narrative Summary** — GPT-4.1-nano generates a 3-4 sentence interpretation of all signals at the top of every analysis. Each run produces a **unique narrative** — same data, different phrasing and emphasis.
+
+Both features are clearly labeled "NON-DETERMINISTIC" in the UI to make the LLM involvement visible.
+
+### DRIVER as Structured AI Collaboration
+
+The DRIVER plugin provided structure that prevented the common failure mode of AI-assisted development: jumping straight to code without planning. Concretely:
+
+- **Product overview first** (`product/product-overview.md`) — Forced articulation of the problem, gap analysis, and architecture *before* writing any code
+- **Roadmap with sections** (`product/product-roadmap.md`) — Broke the build into 4 independent sections (Quant Engine → OpenAI Core → Narrative Layer → Dashboard), each with a clear demo deliverable
+- **Iterative evolution** — When professor feedback arrived (use financialdatasets.ai, make AI more prominent), the structured approach made it clear which files to change and why, without disrupting the architecture
+
+The AI acted as co-worker by: writing initial implementations, proposing architecture decisions, handling API integration details, and executing systematic refactors across multiple files — while the human directed strategy, validated results, and made product decisions.
 
 ---
 

@@ -482,7 +482,18 @@ def analyze_event(
         )
 
         msg = response.choices[0].message
-        messages.append(msg)
+        # Convert to dict to avoid Pydantic serialization bugs in openai 2.21.0
+        msg_dict = {"role": msg.role, "content": msg.content}
+        if msg.tool_calls:
+            msg_dict["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                }
+                for tc in msg.tool_calls
+            ]
+        messages.append(msg_dict)
 
         # If no tool calls, the model is ready to give its answer
         if not msg.tool_calls:
@@ -532,13 +543,22 @@ def analyze_event(
         ),
     })
 
-    classification_response = client.beta.chat.completions.parse(
-        model=model,
-        messages=messages,
-        response_format=RegimeClassification,
+    schema = RegimeClassification.model_json_schema()
+    messages[-1]["content"] += (
+        "\n\nRespond with ONLY a JSON object matching this schema:\n"
+        f"{json.dumps(schema, indent=2)}\n\n"
+        "Valid classification values: regime_shift, sample_space_expansion, mean_reversion, inconclusive\n"
+        "Valid confidence values: high, medium, low"
     )
 
-    result = classification_response.choices[0].message.parsed
+    classification_response = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        response_format={"type": "json_object"},
+    )
+
+    raw = json.loads(classification_response.choices[0].message.content)
+    result = RegimeClassification.model_validate(raw)
 
     if verbose:
         print(f"\n{'='*60}")

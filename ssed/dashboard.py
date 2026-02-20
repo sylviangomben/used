@@ -865,6 +865,7 @@ st.sidebar.markdown("---")
 
 has_openai = bool(os.environ.get("OPENAI_API_KEY"))
 has_newsapi = bool(os.environ.get("NEWSAPI_KEY"))
+has_fds = bool(os.environ.get("FINANCIAL_DATASETS_API_KEY"))
 
 st.sidebar.markdown(f"""
 <div style="font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:1.5px; color:{C['text_dim']}; margin-bottom:10px;">System Status</div>
@@ -877,9 +878,9 @@ st.sidebar.markdown(f"""
         <div class="{'live-dot' if has_newsapi else 'offline-dot'}"></div>
         NewsAPI
     </div>
-    <div class="hero-badge badge-on">
-        <div class="live-dot"></div>
-        yfinance
+    <div class="hero-badge {'badge-on' if has_fds else 'badge-off'}">
+        <div class="{'live-dot' if has_fds else 'offline-dot'}"></div>
+        financialdatasets.ai
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -909,9 +910,9 @@ st.markdown(f"""
             <div class="{'live-dot' if has_newsapi else 'offline-dot'}"></div>
             NewsAPI
         </div>
-        <div class="hero-badge badge-on">
-            <div class="live-dot"></div>
-            Live Market Data
+        <div class="hero-badge {'badge-on' if has_fds else 'badge-off'}">
+            <div class="{'live-dot' if has_fds else 'offline-dot'}"></div>
+            financialdatasets.ai
         </div>
         <div class="hero-badge badge-on" style="color:{C['text_dim']}; border-color:{C['card_border']};">
             MGMT 69000 &middot; Purdue University
@@ -956,8 +957,15 @@ if st.sidebar.button("Run Analysis", type="primary", use_container_width=True):
     st.session_state.pop("news", None)
     st.session_state.pop("bt", None)
     st.session_state.pop("prices_cache", None)
+    st.session_state.pop("classification", None)
+    st.session_state.pop("ai_narrative", None)
 
 if st.session_state.get("running"):
+
+    # --------------------------------------------------------
+    # AI MARKET NARRATIVE placeholder (rendered after data loads)
+    # --------------------------------------------------------
+    narrative_placeholder = st.empty()
 
     # --------------------------------------------------------
     # LAYER 1: Quantitative Signals
@@ -1207,15 +1215,15 @@ if st.session_state.get("running"):
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # LAYER 3: Fusion & Classification
+    # LAYER 3: Fusion & Classification (runs automatically)
     # --------------------------------------------------------
-    st.markdown(section_header("🧠", "Layer 3 — AI Fusion & Classification", "o4-MINI", "label-ai"), unsafe_allow_html=True)
+    st.markdown(section_header("🧠", "Layer 3 — AI Fusion & Classification", "NON-DETERMINISTIC · o4-MINI", "label-ai"), unsafe_allow_html=True)
 
     if has_openai:
-        st.caption("OpenAI o4-mini reasoning over all signals via function calling")
+        st.caption("OpenAI o4-mini reasoning over all signals — non-deterministic (different each run)")
 
-        if st.button("Run AI Classification", type="primary"):
-            with st.spinner("o4-mini is analyzing all signals..."):
+        if "classification" not in st.session_state:
+            with st.spinner("o4-mini is analyzing all signals (non-deterministic LLM reasoning)..."):
                 try:
                     from ssed.openai_core import classify_event
 
@@ -1373,6 +1381,65 @@ if st.session_state.get("running"):
         missing = 4 - signals_detected
         if missing > 0:
             st.caption(f"{missing} signal(s) did not reach threshold")
+
+    # --------------------------------------------------------
+    # AI MARKET NARRATIVE — Non-deterministic LLM summary
+    # --------------------------------------------------------
+    if has_openai and "ai_narrative" not in st.session_state:
+        with st.spinner("Generating AI market narrative (non-deterministic)..."):
+            try:
+                from openai import OpenAI
+                client = OpenAI()
+
+                narrative_context = (
+                    f"Event: {event_name} on {event_date_str}\n"
+                    f"Winner: {winner_ticker} ({quant.divergence.winner_return_pct:+.0f}%)\n"
+                    f"Loser: {loser_ticker} ({quant.divergence.loser_return_pct:.0f}%)\n"
+                    f"HMM Regime: {quant.hmm.regime_label} (p={quant.hmm.regime_probability:.2f})\n"
+                    f"Entropy Z-Score: {quant.entropy.entropy_zscore:.2f}\n"
+                    f"Divergence: {quant.divergence.total_divergence_pct:+.0f}%\n"
+                    f"HHI Change: {quant.concentration.hhi_change:+.4f}\n"
+                    f"News Sentiment: {news_signals.avg_sentiment:+.3f} ({news_signals.sentiment_trend})\n"
+                    f"Novel Themes: {', '.join(news_signals.novel_theme_counts.keys()) if news_signals.novel_theme_counts else 'None'}\n"
+                )
+                if "classification" in st.session_state:
+                    r = st.session_state["classification"]
+                    narrative_context += (
+                        f"\nAI Classification: {r.classification.value}\n"
+                        f"Confidence: {r.confidence.value}\n"
+                        f"What Changed: {r.what_changed}\n"
+                    )
+
+                narrative_response = client.chat.completions.create(
+                    model="gpt-4.1-nano",
+                    messages=[
+                        {"role": "system", "content": (
+                            "You are a senior financial analyst writing a brief market intelligence summary. "
+                            "Write a concise 3-4 sentence narrative paragraph interpreting ALL the signals together. "
+                            "Focus on what the data means for investors. Be specific with numbers. "
+                            "Mention whether this appears to be a regime shift or sample space expansion."
+                        )},
+                        {"role": "user", "content": f"Write a market narrative summary for this analysis:\n\n{narrative_context}"},
+                    ],
+                    max_tokens=300,
+                )
+                st.session_state["ai_narrative"] = narrative_response.choices[0].message.content
+            except Exception as e:
+                st.session_state["ai_narrative"] = None
+
+    # Render the narrative at the top via placeholder
+    with narrative_placeholder.container():
+        if has_openai and st.session_state.get("ai_narrative"):
+            st.markdown(section_header("🤖", "AI Market Narrative", "NON-DETERMINISTIC · GPT-4.1-NANO", "label-ai"), unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="class-banner other" style="animation: fadeInUp 0.6s ease-out;">
+                <div class="class-type" style="color:{C['accent']};">AI-Generated Summary (different each run)</div>
+                <div style="color:{C['text']}; font-size:0.95rem; line-height:1.7; margin-top:8px;">
+                    {st.session_state['ai_narrative']}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 

@@ -14,10 +14,11 @@ Strategy:
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
+
+from ssed.quant_signals import fetch_prices
 
 
 @dataclass
@@ -50,26 +51,6 @@ class BacktestResult:
     start_date: str
     end_date: str
     trading_days: int
-
-
-def fetch_prices(tickers: list, start: str, end: str) -> pd.DataFrame:
-    """Fetch adjusted close prices."""
-    data = yf.download(tickers, start=start, end=end, progress=False)
-    if data.empty:
-        raise ValueError(f"No data for {tickers}")
-
-    if isinstance(data.columns, pd.MultiIndex):
-        prices = data["Close"].copy()
-        if isinstance(prices, pd.Series):
-            prices = prices.to_frame(name=tickers[0])
-    else:
-        prices = data[["Close"]]
-        prices.columns = tickers[:1]
-
-    if prices.index.tz is not None:
-        prices.index = prices.index.tz_localize(None)
-
-    return prices.dropna()
 
 
 def run_backtest(

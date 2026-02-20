@@ -7,14 +7,18 @@ metrics to produce structured signals for the fusion layer.
 All numbers are deterministic — no LLM involvement in this layer.
 """
 
+import os
 import numpy as np
 import pandas as pd
-import yfinance as yf
+import requests
 from hmmlearn.hmm import GaussianHMM
 from scipy.stats import entropy as scipy_entropy
 from dataclasses import dataclass, asdict
 from typing import Optional
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 # ============================================================
@@ -86,21 +90,44 @@ class QuantSignals:
 # DATA FETCHING
 # ============================================================
 
+def _fetch_single_ticker(ticker: str, start: str, end: str) -> pd.Series:
+    """Fetch close prices for a single ticker from financialdatasets.ai."""
+    api_key = os.environ.get("FINANCIAL_DATASETS_API_KEY", "")
+    url = "https://api.financialdatasets.ai/prices/"
+    params = {
+        "ticker": ticker,
+        "interval": "day",
+        "interval_multiplier": 1,
+        "start_date": start,
+        "end_date": end,
+    }
+    headers = {"X-API-KEY": api_key}
+
+    print(f"  [financialdatasets.ai] Fetching {ticker} ({start} to {end})...")
+    resp = requests.get(url, params=params, headers=headers, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+
+    prices_list = data.get("prices", [])
+    if not prices_list:
+        raise ValueError(f"No data returned for {ticker} from financialdatasets.ai")
+
+    df = pd.DataFrame(prices_list)
+    df["time"] = pd.to_datetime(df["time"])
+    df = df.set_index("time").sort_index()
+    return df["close"].rename(ticker)
+
+
 def fetch_prices(tickers: list, start: str, end: str) -> pd.DataFrame:
-    """Fetch adjusted close prices. Returns DataFrame with tickers as columns."""
-    data = yf.download(tickers, start=start, end=end, progress=False)
-    if data.empty:
-        raise ValueError(f"No data returned for {tickers}")
+    """Fetch close prices from financialdatasets.ai. Returns DataFrame with tickers as columns."""
+    series_list = []
+    for ticker in tickers:
+        s = _fetch_single_ticker(ticker, start, end)
+        series_list.append(s)
 
-    if isinstance(data.columns, pd.MultiIndex):
-        prices = data["Close"].copy()
-        if isinstance(prices, pd.Series):
-            prices = prices.to_frame(name=tickers[0])
-    else:
-        prices = data[["Close"]]
-        prices.columns = tickers[:1]
+    prices = pd.concat(series_list, axis=1)
 
-    # Drop timezone info
+    # Drop timezone info if present
     if prices.index.tz is not None:
         prices.index = prices.index.tz_localize(None)
 
