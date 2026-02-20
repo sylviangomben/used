@@ -2044,6 +2044,137 @@ if "sector_signals" in st.session_state:
                 delta="Wide divergence" if spread > 100 else "Normal range",
             )
 
+# ============================================================
+# AI-POWERED APP Q&A (always visible)
+# ============================================================
+
+st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+st.markdown(section_header("❓", "AI-Powered App Q&A", "NON-DETERMINISTIC · GPT-4.1-NANO", "label-ai"), unsafe_allow_html=True)
+st.caption(
+    "Ask the AI anything about how SSED works — methodology, signals, architecture, "
+    "or how to interpret results. Powered by GPT-4.1-nano (non-deterministic)."
+)
+
+APP_QA_SYSTEM_PROMPT = """You are the AI help assistant for SSED (Sample Space Expansion Detector), a financial analytics tool built for MGMT 69000 at Purdue University.
+
+WHAT SSED DOES:
+SSED detects when the investment universe itself changes (sample space expansion) vs when probabilities shift within a known universe (regime shift). It fuses quantitative signals with LLM-powered narrative analysis.
+
+ARCHITECTURE — 3 LAYERS:
+
+Layer 1: Quantitative Signals (deterministic, no AI)
+- HMM Regime Detection: Gaussian Hidden Markov Model with 3 volatility states (low/medium/high). Fitted via hmmlearn. Regimes sorted by variance. Deteriorating log-likelihood suggests the model is seeing data it wasn't trained on.
+- Shannon Entropy: Rolling entropy of return distributions. Low entropy = concentrated returns (few stocks dominating). Z-score < -2 is unusual.
+- Winner/Loser Divergence: Spread between suspected winner and loser. >500% suggests creative destruction, not normal rotation. Velocity measures acceleration.
+- HHI Concentration: Herfindahl-Hirschman Index comparing sector weights before/after event. Increasing HHI = market dominated by fewer sectors.
+
+Layer 2: Narrative Signals (AI-powered, non-deterministic)
+- News sentiment scored by GPT-4.1-nano (-1 to +1)
+- Novel theme detection: flags terms like "AI infrastructure", "generative AI" as new category indicators
+- Falls back to keyword heuristics without OpenAI key
+
+Layer 3: AI Fusion & Classification (non-deterministic)
+- OpenAI o4-mini reasons over all signals via function calling (6 tools, strict: True)
+- Produces typed RegimeClassification via Pydantic: classification, confidence, reasoning, key evidence
+- Classifications: sample_space_expansion, regime_shift, mean_reversion, inconclusive
+- Runs automatically on every analysis — different reasoning each time
+
+KEY CONCEPTS:
+- Regime Shift (P changed): Probabilities change within known universe. Same assets, different dynamics. Example: tariff shock.
+- Sample Space Expansion (X changed): Universe itself changes. New asset classes emerge, old ones die. Example: ChatGPT created "AI infrastructure".
+- The detection signal: when BOTH statistical measures (entropy, HMM, divergence, HHI) AND narrative measures (novel themes, new terminology) simultaneously indicate the model is breaking down.
+
+FEATURES:
+- Long-Short Backtest: Dollar-neutral strategy (50% long winners, 50% short losers). Metrics: total return, alpha, Sharpe, max drawdown.
+- Multi-Event Comparison: Compare expansion signals across historical disruptions side by side.
+- Sector Heatmap: Live scan of all 11 S&P 500 sectors for expansion/contraction signals.
+- AI Market Narrative: GPT-4.1-nano generates a summary paragraph interpreting all signals (non-deterministic).
+- AI Chat: Ask questions about current analysis results.
+- App Q&A (this feature): Ask about methodology and how the app works.
+
+DATA SOURCES:
+- Market prices: financialdatasets.ai REST API
+- News: NewsAPI (free tier)
+- SEC filings: EDGAR API
+- AI: OpenAI (o4-mini for classification, GPT-4.1-nano for sentiment/narrative/chat)
+
+SIGNAL CONVERGENCE THRESHOLDS:
+- Divergence > 500%
+- Entropy z-score < -2
+- HHI increasing > 0.02
+- Novel narrative themes present
+When 3+ of 4 signals trigger → sample space expansion. 2 → likely expansion. <2 → regime shift.
+
+Answer questions clearly and concisely. Use specific numbers and examples when relevant. If asked about something outside the app, redirect to app-related topics."""
+
+if "qa_messages" not in st.session_state:
+    st.session_state["qa_messages"] = []
+
+# Suggested questions
+if not st.session_state["qa_messages"]:
+    st.markdown(f"""
+    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px;">
+        <span style="background:{C['card']}; border:1px solid {C['card_border']}; border-radius:20px;
+            padding:6px 14px; font-size:0.78rem; color:{C['text']};">
+            What is sample space expansion?
+        </span>
+        <span style="background:{C['card']}; border:1px solid {C['card_border']}; border-radius:20px;
+            padding:6px 14px; font-size:0.78rem; color:{C['text']};">
+            How does the HMM regime detection work?
+        </span>
+        <span style="background:{C['card']}; border:1px solid {C['card_border']}; border-radius:20px;
+            padding:6px 14px; font-size:0.78rem; color:{C['text']};">
+            What makes the AI non-deterministic?
+        </span>
+        <span style="background:{C['card']}; border:1px solid {C['card_border']}; border-radius:20px;
+            padding:6px 14px; font-size:0.78rem; color:{C['text']};">
+            How do I interpret the entropy z-score?
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+for msg in st.session_state["qa_messages"]:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+if qa_input := st.chat_input("Ask about the app — methodology, signals, how it works...", key="qa_chat"):
+    st.session_state["qa_messages"].append({"role": "user", "content": qa_input})
+    with st.chat_message("user"):
+        st.markdown(qa_input)
+
+    with st.chat_message("assistant"):
+        if has_openai:
+            try:
+                from openai import OpenAI
+                client = OpenAI()
+                messages = [{"role": "system", "content": APP_QA_SYSTEM_PROMPT}]
+                messages += [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state["qa_messages"]
+                ]
+                with st.spinner("Thinking..."):
+                    response = client.chat.completions.create(
+                        model="gpt-4.1-nano",
+                        messages=messages,
+                        max_tokens=600,
+                    )
+                    reply = response.choices[0].message.content
+            except Exception as e:
+                reply = f"OpenAI API error: {e}"
+        else:
+            reply = (
+                "App Q&A requires an OpenAI API key. Set `OPENAI_API_KEY` in your `.env` file.\n\n"
+                "**In the meantime, here's a quick overview:**\n\n"
+                "SSED uses 3 layers to detect sample space expansion:\n"
+                "- **Layer 1** (Quant): HMM regimes, Shannon entropy, divergence, HHI\n"
+                "- **Layer 2** (Narrative): News sentiment + novel theme detection via GPT-4.1-nano\n"
+                "- **Layer 3** (Fusion): o4-mini reasons over all signals via function calling\n\n"
+                "When 3+ of 4 convergence signals trigger, the event is classified as sample space expansion."
+            )
+
+        st.markdown(reply)
+        st.session_state["qa_messages"].append({"role": "assistant", "content": reply})
+
 # Footer
 st.markdown(f"""
 <div class="app-footer">
