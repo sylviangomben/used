@@ -959,6 +959,7 @@ if st.sidebar.button("Run Analysis", type="primary", use_container_width=True):
     st.session_state.pop("prices_cache", None)
     st.session_state.pop("classification", None)
     st.session_state.pop("ai_narrative", None)
+    st.session_state.pop("qa_messages", None)
 
 if st.session_state.get("running"):
 
@@ -1585,103 +1586,6 @@ if st.session_state.get("running"):
         """, unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # AI CHAT
-    # --------------------------------------------------------
-    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-    st.markdown(section_header("💬", "Ask SSED", "AI CHAT", "label-ai"), unsafe_allow_html=True)
-    st.caption(
-        "Chat with the AI about this analysis — ask about signals, "
-        "the thesis, portfolio strategy, or anything market-related"
-    )
-
-    # Build context from current analysis
-    analysis_context = (
-        f"Event: {event_name} on {event_date_str}\n"
-        f"Winner: {winner_ticker} ({quant.divergence.winner_return_pct:+.0f}%)\n"
-        f"Loser: {loser_ticker} ({quant.divergence.loser_return_pct:.0f}%)\n"
-        f"HMM Regime: {quant.hmm.regime_label} (p={quant.hmm.regime_probability:.2f})\n"
-        f"Entropy Z-Score: {quant.entropy.entropy_zscore:.2f}\n"
-        f"Divergence: {quant.divergence.total_divergence_pct:+.0f}%\n"
-        f"HHI Change: {quant.concentration.hhi_change:+.4f}\n"
-        f"News Sentiment: {news_signals.avg_sentiment:+.3f} ({news_signals.sentiment_trend})\n"
-        f"Novel Themes: {', '.join(news_signals.novel_theme_counts.keys()) if news_signals.novel_theme_counts else 'None'}\n"
-    )
-    analysis_context += (
-        f"\nBacktest: Long {', '.join(bt.long_tickers)} / Short {', '.join(bt.short_tickers)}\n"
-        f"Total Return: {bt.total_return_pct:+.1f}%, Alpha: {bt.alpha_pct:+.1f}%, "
-        f"Sharpe: {bt.sharpe_ratio:.2f}\n"
-    )
-
-    if "classification" in st.session_state:
-        r = st.session_state["classification"]
-        analysis_context += (
-            f"\nAI Classification: {r.classification.value}\n"
-            f"Confidence: {r.confidence.value}\n"
-            f"Reasoning: {r.reasoning}\n"
-        )
-
-    ssed_system_prompt = (
-        "You are SSED (Sample Space Expansion Detector), an AI finance analyst. "
-        "You help users understand market regime changes and sample space expansion events.\n\n"
-        "Key concepts:\n"
-        "- Regime Shift (P change): probabilities change within a known investment universe\n"
-        "- Sample Space Expansion (X change): the investment universe ITSELF changes — "
-        "new asset classes emerge, old ones may die\n"
-        "- Shannon entropy measures concentration/novelty in return distributions\n"
-        "- HMM (Hidden Markov Model) detects volatility regime states\n"
-        "- Divergence tracks winner/loser spread as creative destruction signal\n\n"
-        f"Current analysis data:\n{analysis_context}\n\n"
-        "Answer concisely. Use the analysis data above to give specific, data-backed answers. "
-        "If asked about things outside this analysis, you can discuss general finance and AI market concepts."
-    )
-
-    if "chat_messages" not in st.session_state:
-        st.session_state["chat_messages"] = []
-
-    for msg in st.session_state["chat_messages"]:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    if user_input := st.chat_input("Ask about the analysis..."):
-        st.session_state["chat_messages"].append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
-
-        with st.chat_message("assistant"):
-            if has_openai:
-                try:
-                    from openai import OpenAI
-                    client = OpenAI()
-                    messages = [{"role": "system", "content": ssed_system_prompt}]
-                    messages += [
-                        {"role": m["role"], "content": m["content"]}
-                        for m in st.session_state["chat_messages"]
-                    ]
-                    with st.spinner("Thinking..."):
-                        response = client.chat.completions.create(
-                            model="gpt-4.1-nano",
-                            messages=messages,
-                            max_tokens=800,
-                        )
-                        reply = response.choices[0].message.content
-                except Exception as e:
-                    reply = f"OpenAI API error: {e}\n\nAdd credits at https://platform.openai.com/settings/organization/billing/overview"
-            else:
-                reply = (
-                    "Chat requires an OpenAI API key. Set `OPENAI_API_KEY` in your `.env` file "
-                    "to enable AI-powered chat.\n\n"
-                    f"**Quick summary of current analysis:**\n"
-                    f"- {event_name} triggered {triggered_count}/4 convergence signals\n"
-                    f"- {winner_ticker} gained {quant.divergence.winner_return_pct:+.0f}% "
-                    f"while {loser_ticker} fell {quant.divergence.loser_return_pct:.0f}%\n"
-                    f"- Long-short backtest returned {bt.total_return_pct:+.1f}% "
-                    f"with {bt.alpha_pct:+.1f}% alpha"
-                )
-
-            st.markdown(reply)
-            st.session_state["chat_messages"].append({"role": "assistant", "content": reply})
-
-    # --------------------------------------------------------
     # THE INSIGHT
     # --------------------------------------------------------
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
@@ -2051,8 +1955,8 @@ if "sector_signals" in st.session_state:
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 st.markdown(section_header("❓", "AI-Powered App Q&A", "NON-DETERMINISTIC · GPT-4.1-NANO", "label-ai"), unsafe_allow_html=True)
 st.caption(
-    "Ask the AI anything about how SSED works — methodology, signals, architecture, "
-    "or how to interpret results. Powered by GPT-4.1-nano (non-deterministic)."
+    "Ask the AI anything — how SSED works, what the signals mean, how to interpret results, "
+    "or questions about the current analysis. Powered by GPT-4.1-nano (non-deterministic)."
 )
 
 APP_QA_SYSTEM_PROMPT = """You are the AI help assistant for SSED (Sample Space Expansion Detector), a financial analytics tool built for MGMT 69000 at Purdue University.
@@ -2105,7 +2009,8 @@ SIGNAL CONVERGENCE THRESHOLDS:
 - Novel narrative themes present
 When 3+ of 4 signals trigger → sample space expansion. 2 → likely expansion. <2 → regime shift.
 
-Answer questions clearly and concisely. Use specific numbers and examples when relevant. If asked about something outside the app, redirect to app-related topics."""
+Answer questions clearly and concisely. Use specific numbers and examples when relevant. If asked about something outside the app, redirect to app-related topics.
+You can answer BOTH questions about how the app works AND questions about the current analysis results (if an analysis has been run)."""
 
 if "qa_messages" not in st.session_state:
     st.session_state["qa_messages"] = []
@@ -2137,7 +2042,7 @@ for msg in st.session_state["qa_messages"]:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if qa_input := st.chat_input("Ask about the app — methodology, signals, how it works...", key="qa_chat"):
+if qa_input := st.chat_input("Ask about SSED — methodology, signals, analysis results, or how it works..."):
     st.session_state["qa_messages"].append({"role": "user", "content": qa_input})
     with st.chat_message("user"):
         st.markdown(qa_input)
@@ -2147,7 +2052,27 @@ if qa_input := st.chat_input("Ask about the app — methodology, signals, how it
             try:
                 from openai import OpenAI
                 client = OpenAI()
-                messages = [{"role": "system", "content": APP_QA_SYSTEM_PROMPT}]
+                # Build dynamic system prompt with analysis data if available
+                qa_prompt = APP_QA_SYSTEM_PROMPT
+                if st.session_state.get("running") and "quant" in st.session_state:
+                    q = st.session_state["quant"]
+                    qa_prompt += f"\n\nCURRENT ANALYSIS DATA:\n"
+                    qa_prompt += f"Event: {event_name} on {event_date_str}\n"
+                    qa_prompt += f"Winner: {winner_ticker} ({q.divergence.winner_return_pct:+.0f}%)\n"
+                    qa_prompt += f"Loser: {loser_ticker} ({q.divergence.loser_return_pct:.0f}%)\n"
+                    qa_prompt += f"HMM Regime: {q.hmm.regime_label} (p={q.hmm.regime_probability:.2f})\n"
+                    qa_prompt += f"Entropy Z-Score: {q.entropy.entropy_zscore:.2f}\n"
+                    qa_prompt += f"Divergence: {q.divergence.total_divergence_pct:+.0f}%\n"
+                    qa_prompt += f"HHI Change: {q.concentration.hhi_change:+.4f}\n"
+                    if "bt" in st.session_state:
+                        b = st.session_state["bt"]
+                        qa_prompt += f"Backtest: Long {', '.join(b.long_tickers)} / Short {', '.join(b.short_tickers)}\n"
+                        qa_prompt += f"Total Return: {b.total_return_pct:+.1f}%, Alpha: {b.alpha_pct:+.1f}%, Sharpe: {b.sharpe_ratio:.2f}\n"
+                    if "classification" in st.session_state:
+                        r = st.session_state["classification"]
+                        qa_prompt += f"AI Classification: {r.classification.value} (confidence: {r.confidence.value})\n"
+                        qa_prompt += f"Reasoning: {r.reasoning}\n"
+                messages = [{"role": "system", "content": qa_prompt}]
                 messages += [
                     {"role": m["role"], "content": m["content"]}
                     for m in st.session_state["qa_messages"]
